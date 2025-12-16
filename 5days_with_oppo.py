@@ -1,5 +1,7 @@
 import telebot
 import requests
+from datetime import datetime, timedelta
+
 
 TOKEN = 'YOUR_BOT_TOKEN'
 bot = telebot.TeleBot("8599848575:AAF0aUSBXMDKZbJg189Ve7Se-jKtW6BFNrI")
@@ -138,23 +140,6 @@ def show_weather(message):
                     f"• Влажность: {humidity}%")
             
             bot.reply_to(message, reply)
-        else:
-            # Резервный вариант с учетом единиц измерения
-            import random
-            if units == 'C':
-                temps = random.randint(-10, 30)
-                temp_unit = '°C'
-            else:
-                temps = random.randint(14, 86)  # -10°C = 14°F, 30°C = 86°F
-                temp_unit = '°F'
-                
-            conditions = ["☀️ Солнечно", "☁️ Облачно", "🌧️ Дождь", "❄️ Снег"]
-            condition = random.choice(conditions)
-            bot.reply_to(message, 
-                f"Погода в {city}:\n"
-                f"{condition}, {temps}{temp_unit}\n"
-                f"(данные примерные)")
-            
     except Exception as e:
         bot.reply_to(message, f"Ошибка: {e}")
 
@@ -234,6 +219,77 @@ def forget_city(message):
     else:
         bot.reply_to(message, "У тебя нет сохраненного города.")
 
+@bot.message_handler(commands=['forecast'])
+def show_forecast(message):
+    user_id = message.from_user.id
+    
+    if user_id not in user_cities:
+        bot.reply_to(message, "Сначала установи город командой /setcity")
+        return
+    
+    city = user_cities[user_id]
+    units = user_units.get(user_id, 'C')
+    
+    # try:
+    api_key = '3d9de74844d28377e81415151cbe6a66'
+    
+    # Выбираем units для API
+    if units == 'C':
+        api_units = 'metric'
+        temp_unit = '°C'
+    else:
+        api_units = 'imperial'
+        temp_unit = '°F'
+    
+    # Запрос прогноза на 5 дней (OpenWeatherMap дает по 3 часа, нам нужны дни)
+    url = f'https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={api_key}&units={api_units}&lang=ru'
+    response = requests.get(url)
+    data = response.json()
+    
+    if data.get('cod') == '200':
+        # Берем прогноз на 12:00 каждого дня (ближайший к полудню)
+        forecasts = []
+        today = datetime.now().date()
+        
+        for item in data['list']:
+            # Время прогноза
+            forecast_time = datetime.fromtimestamp(item['dt'])
+            
+            # Берем только прогнозы на ~12:00 (между 11 и 13)
+            if 11 <= forecast_time.hour <= 13:
+                forecasts.append({
+                    'date': forecast_time.date(),
+                    'temp': item['main']['temp'],
+                    'weather': item['weather'][0]['description'].capitalize(),
+                    'day_name': get_day_name(forecast_time.date())
+                })
+        
+        # Формируем ответ (первые 5 дней, включая сегодня)
+        reply = f"📅 Прогноз на 5 дней для {city} ({temp_unit}):\n\n"
+        
+        for i, forecast in enumerate(forecasts[:5]):
+            reply += f"{forecast['day_name']}:\n"
+            reply += f"  {forecast['weather']}, {forecast['temp']}{temp_unit}\n\n"
+        
+        bot.reply_to(message, reply)
+    else:
+        bot.reply_to(message, f"Не удалось получить прогноз для {city}")
+
+# Вспомогательная функция для названий дней
+def get_day_name(date_obj):
+    today = datetime.now().date()
+    
+    if date_obj == today:
+        return "Сегодня"
+    elif date_obj == today + timedelta(days=1):
+        return "Завтра"
+    elif date_obj == today + timedelta(days=2):
+        return "Послезавтра"
+    else:
+        # Для остальных дней: Пн, Вт и т.д.
+        days_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        return days_ru[date_obj.weekday()]
+
 # Обновленная команда /help
 @bot.message_handler(commands=['help'])
 def help_command(message):
@@ -246,6 +302,7 @@ def help_command(message):
         "/start - начать работу\n"
         "/setcity [город] - установить город\n"
         "/pogoda - показать погоду в твоем городе\n"
+        "/forecast - показать погоду на 5 дней\n"
         "/mycity - показать активный город и единицы\n"
         "/changecity [город] - сменить город\n"
         "/units - переключить °C ↔ °F\n"
