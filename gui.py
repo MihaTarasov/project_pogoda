@@ -1,3 +1,4 @@
+from telebot import types
 import telebot
 import requests
 from datetime import datetime, timedelta
@@ -8,10 +9,35 @@ bot = telebot.TeleBot("8599848575:AAF0aUSBXMDKZbJg189Ve7Se-jKtW6BFNrI")
 
 # Хранилище данных
 user_cities = {}
-# Хранилище единиц измерения {user_id: 'C' или 'F'}
-user_units = {}  # По умолчанию 'C' (Цельсий)
 
-# Команда /start
+# Хранилище единиц измерения {user_id: 'C' или 'F'}
+user_units = {}
+
+def get_main_keyboard():
+    """Главная клавиатура с 4 кнопками"""
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    
+    btn1 = types.KeyboardButton('🌤️ Погода сейчас')
+    btn2 = types.KeyboardButton('📅 Прогноз на 5 дней')
+    btn3 = types.KeyboardButton('🏙️ Мой город')
+    btn4 = types.KeyboardButton('⚙️ Настройки')
+    
+    keyboard.add(btn1, btn2, btn3, btn4)
+    return keyboard
+
+def get_settings_keyboard():
+    """Клавиатура настроек"""
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    
+    btn1 = types.KeyboardButton('📋 Справка')
+    btn2 = types.KeyboardButton('✏️ Изменить город')
+    btn3 = types.KeyboardButton('🌡️ Единицы измерения')
+    btn4 = types.KeyboardButton('⬅️ Назад')
+    
+    keyboard.add(btn1, btn2, btn3, btn4)
+    return keyboard
+
+# Обновляем команду /start чтобы показывала клавиатуру
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -20,21 +46,23 @@ def start(message):
     unit_symbol = '°C' if units == 'C' else '°F'
     
     if user_id in user_cities:
-        bot.reply_to(message, 
+        bot.send_message(
+            message.chat.id,
             f"Привет! Я уже знаю твой город: {user_cities[user_id]}\n"
             f"Единицы измерения: {unit_symbol}\n\n"
-            f"Основные команды:\n"
-            f"/pogoda - показать погоду\n"
-            f"/mycity - активный город\n"
-            f"/changecity - сменить город\n"
-            f"/units - сменить единицы измерения\n"
-            f"/help - все команды")
+            f"Используй кнопки ниже или команды:",
+            reply_markup=get_main_keyboard()
+        )
     else:
-        bot.reply_to(message,
+        bot.send_message(
+            message.chat.id,
             "Привет! Я бот для погоды. Сначала установи свой город:\n"
             "Напиши /setcity и название города\n"
             f"Единицы измерения: {unit_symbol}\n"
-            "Например: /setcity Москва")
+            "Например: /setcity Москва",
+            reply_markup=get_main_keyboard()
+        )
+
 
 # Команда /units - сменить единицы измерения
 @bot.message_handler(commands=['units'])
@@ -230,7 +258,6 @@ def show_forecast(message):
     city = user_cities[user_id]
     units = user_units.get(user_id, 'C')
     
-    # try:
     api_key = '3d9de74844d28377e81415151cbe6a66'
     
     # Выбираем units для API
@@ -241,21 +268,20 @@ def show_forecast(message):
         api_units = 'imperial'
         temp_unit = '°F'
     
-    # Запрос прогноза на 5 дней (OpenWeatherMap дает по 3 часа, нам нужны дни)
+    # Запрос прогноза на 5 дней 
     url = f'https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={api_key}&units={api_units}&lang=ru'
     response = requests.get(url)
     data = response.json()
     
     if data.get('cod') == '200':
-        # Берем прогноз на 12:00 каждого дня (ближайший к полудню)
+        # Берем прогноз
         forecasts = []
         today = datetime.now().date()
         
         for item in data['list']:
-            # Время прогноза
+
             forecast_time = datetime.fromtimestamp(item['dt'])
-            
-            # Берем только прогнозы на ~12:00 (между 11 и 13)
+
             if 11 <= forecast_time.hour <= 13:
                 forecasts.append({
                     'date': forecast_time.date(),
@@ -290,7 +316,79 @@ def get_day_name(date_obj):
         days_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
         return days_ru[date_obj.weekday()]
 
-# Обновленная команда /help
+# Кнопка "🌤️ Погода сейчас" - вызывает команду /pogoda
+@bot.message_handler(func=lambda message: message.text == '🌤️ Погода сейчас')
+def button_pogoda(message):
+    # Просто вызываем существующую функцию show_weather
+    show_weather(message)
+
+# Кнопка "📅 Прогноз на 5 дней" - вызывает команду /forecast
+@bot.message_handler(func=lambda message: message.text == '📅 Прогноз на 5 дней')
+def button_forecast(message):
+    show_forecast(message)
+
+# Кнопка "🏙️ Мой город" - вызывает команду /mycity
+@bot.message_handler(func=lambda message: message.text == '🏙️ Мой город')
+def button_mycity(message):
+    show_city(message)
+
+# Кнопка "⚙️ Настройки" - показывает меню настроек
+@bot.message_handler(func=lambda message: message.text == '⚙️ Настройки')
+def button_settings(message):
+    bot.send_message(
+        message.chat.id,
+        "⚙️ Настройки:",
+        reply_markup=get_settings_keyboard()
+    )
+
+# Кнопка "📋 Справка" - вызывает команду /help
+@bot.message_handler(func=lambda message: message.text == '📋 Справка')
+def button_help(message):
+    help_command(message)
+
+# Кнопка "✏️ Изменить город" - показывает подсказку
+@bot.message_handler(func=lambda message: message.text == '✏️ Изменить город')
+def button_change_city(message):
+    user_id = message.from_user.id
+    if user_id in user_cities:
+        current_city = user_cities[user_id]
+        bot.send_message(
+            message.chat.id,
+            f"Твой текущий город: {current_city}\n\n"
+            "Чтобы изменить город, напиши:\n"
+            f"/changecity [новый город]\n"
+            f"Пример: /changecity Казань",
+            reply_markup=get_settings_keyboard()
+        )
+    else:
+        bot.send_message(
+            message.chat.id,
+            "У тебя еще нет установленного города.\n"
+            "Напиши /setcity Москва",
+            reply_markup=get_settings_keyboard()
+        )
+
+# Кнопка "🌡️ Единицы измерения" - вызывает команду /units
+@bot.message_handler(func=lambda message: message.text == '🌡️ Единицы измерения')
+def button_units(message):
+    change_units(message)
+    # После смены показываем клавиатуру настроек снова
+    bot.send_message(
+        message.chat.id,
+        "Выбери действие:",
+        reply_markup=get_settings_keyboard()
+    )
+
+# Кнопка "⬅️ Назад" - возвращает в главное меню
+@bot.message_handler(func=lambda message: message.text == '⬅️ Назад')
+def button_back(message):
+    bot.send_message(
+        message.chat.id,
+        "Главное меню:",
+        reply_markup=get_main_keyboard()
+    )
+
+# Также нужно обновить команду /help чтобы показывала главную клавиатуру
 @bot.message_handler(commands=['help'])
 def help_command(message):
     user_id = message.from_user.id
@@ -299,23 +397,22 @@ def help_command(message):
     
     help_text = (
         f"📋 Доступные команды (единицы: {unit_symbol}):\n\n"
-        "/start - начать работу\n"
+        "Текстовые команды:\n"
         "/setcity [город] - установить город\n"
-        "/pogoda - показать погоду в твоем городе\n"
-        "/forecast - показать погоду на 5 дней\n"
-        "/mycity - показать активный город и единицы\n"
         "/changecity [город] - сменить город\n"
-        "/units - переключить °C ↔ °F\n"
-        "/forgetcity - удалить город из памяти\n"
-        "/help - эта справка\n\n"
-        "Примеры:\n"
-        "/setcity Москва\n"
-        "/changecity Казань\n"
-        "/units - сменить на Фаренгейты"
+        "\nИли используй кнопки:\n"
+        "🌤️ Погода сейчас - текущая погода\n"
+        "📅 Прогноз на 5 дней - прогноз\n"
+        "🏙️ Мой город - активный город\n"
+        "⚙️ Настройки - дополнительные опции"
     )
-    bot.reply_to(message, help_text)
+    bot.send_message(
+        message.chat.id,
+        help_text,
+        reply_markup=get_main_keyboard()
+    )
 
 # Запуск
 if __name__ == '__main__':
-    print("Бот с переключением единиц измерения запущен!")
+    print("Бот запущен!")
     bot.polling()
